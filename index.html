@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>健康風險提示</title>
+  <style>
+    body { font-family: "PingFang HK", sans-serif; padding: 20px; background: #f9f9f9; }
+    h2 { color: #2c6fbb; }
+    #result { margin-top: 20px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    .loading { color: #666; }
+  </style>
+</head>
+<body>
+  <p>  網頁已載入 </p>
+  <h2>📍 正在取得您的位置...</h2>
+  <div id="result" class="loading">請允許位置權限以獲取附近健康風險提示。</div>
+
+  <script>
+    // 📌 第一步：先定義要用的函數
+    const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1mpwYy1yPcl_URhK1_1056P69OCJCVhyuVN10VUG0EN8/export?format=csv";
+
+    // 假設你的 Google Sheet 有這些欄位：latitude, longitude, district, risk_level
+    function showRiskForLocation(userLat, userLng) {
+      document.getElementById("result").innerHTML = "正在載入區域資料...";
+      
+      fetch(SHEET_CSV_URL)
+        .then(response => {
+          if (!response.ok) throw new Error("無法載入資料");
+          return response.text();
+        })
+        .then(csvText => {
+          const lines = csvText.trim().split('\n');
+          const headers = lines[0].split(',').map(h => h.trim());
+          const latIdx = headers.indexOf('latitude');
+          const lngIdx = headers.indexOf('longitude');
+          const districtIdx = headers.indexOf('district'); // ⚠️ 請確認你的 Google Sheet 欄位名稱是 'district'
+          const riskIdx = headers.indexOf('risk_level');  // ⚠️ 同樣確認風險等級欄位名
+
+          // 簡單找最近的區（實際應用建議用 GIS 多邊形判斷，但這裡先用最近點）
+          let nearestDistrict = null;
+          let minDistance = Infinity;
+
+          for (let i = 1; i < lines.length; i++) {
+            const row = lines[i].split(',');
+            const lat = parseFloat(row[latIdx]);
+            const lng = parseFloat(row[lngIdx]);
+            const district = row[districtIdx];
+
+            if (isNaN(lat) || isNaN(lng)) continue;
+
+            const distance = Math.sqrt(
+              Math.pow(userLat - lat, 2) + Math.pow(userLng - lng, 2)
+            );
+
+            if (distance < minDistance) {
+              minDistance = distance;
+              nearestDistrict = {
+                name: district,
+                risk: row[riskIdx]
+              };
+            }
+          }
+
+          if (nearestDistrict) {
+            let riskColor = "#4CAF50"; // green
+            if (nearestDistrict.risk === "3") riskColor = "#FF9800"; // orange
+            if (nearestDistrict.risk === "4") riskColor = "#F44336"; // red
+
+            document.getElementById("result").innerHTML = `
+              <h3>您位於：${nearestDistrict.name}</h3>
+              <p>健康風險等級：<span style="color:${riskColor}; font-weight:bold;">
+                ${nearestDistrict.risk}
+              </span></p >
+              <p>建議：注意保暖、減少外出、保持室內通風。</p >
+            `;
+          } else {
+            document.getElementById("result").innerHTML = "找不到對應的行政區資料。";
+          }
+        })
+        .catch(err => {
+          console.error("資料載入失敗：", err);
+          document.getElementById("result").innerHTML = "⚠️ 無法載入風險資料，請稍後再試。";
+        });
+    }
+
+    // 📌 第二步：再執行定位
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          console.log("定位成功：", lat, lng);
+          showRiskForLocation(lat, lng);
+        },
+        (err) => {
+          console.error("定位失敗：", err);
+          let msg = "請允許位置權限以獲取附近健康風險提示。";
+          if (err.code === 1) msg += "<br>（請點擊網址列左側「🔒」→ 開啟「位置」）";
+          document.getElementById("result").innerHTML = msg;
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 60000
+        }
+      );
+    } else {
+      document.getElementById("result").innerHTML = "您的瀏覽器不支援定位功能。";
+    }
+  </script>
+</body>
+</html>
